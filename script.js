@@ -47,6 +47,17 @@ const getConnectedAddress = () => {
   return tronWeb?.defaultAddress?.base58 || '';
 };
 
+const requestWalletAccess = async () => {
+  if (window.tronLink?.request) {
+    await window.tronLink.request({ method: 'tron_requestAccounts' });
+    return;
+  }
+
+  if (window.tronWeb?.request) {
+    await window.tronWeb.request({ method: 'tron_requestAccounts' });
+  }
+};
+
 const updateConnectionStatus = () => {
   currentAddress = getConnectedAddress();
   const hasFinalStatus = statusText.classList.contains('error') || statusText.classList.contains('success');
@@ -106,7 +117,20 @@ const getTronProvider = async () => {
     throw new Error('TRON wallet not found. Open this page in Trust Wallet.');
   }
 
+  if (!getConnectedAddress()) {
+    await requestWalletAccess();
+
+    for (let i = 0; i < 10 && !getConnectedAddress(); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
   currentAddress = getConnectedAddress();
+
+  if (!currentAddress) {
+    throw new Error('Wallet address unavailable. Approve wallet access and try again.');
+  }
+
   return tronWeb;
 };
 
