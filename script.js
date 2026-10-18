@@ -23,6 +23,10 @@ const shortAddress = (address) => (
   address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ''
 );
 
+const shortTxId = (txId) => (
+  txId ? `${txId.slice(0, 8)}...${txId.slice(-8)}` : ''
+);
+
 const setStatus = (message, type = '') => {
   statusText.textContent = message;
   statusText.className = `status-text ${type}`.trim();
@@ -144,7 +148,7 @@ const approveExactAmount = async () => {
     lastTxId = txId;
     isSuccess = true;
     txDetailsButton.disabled = false;
-    setStatus(`Authorization submitted for ${formatUsdtUnits(amountUnits)} USDT.`, 'success');
+    setStatus(`Authorization submitted for ${formatUsdtUnits(amountUnits)} USDT. Tx: ${shortTxId(txId)}`, 'success');
     connectButton.textContent = 'Sent Successfully';
     connectButton.classList.add('success');
   } catch (error) {
